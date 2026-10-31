@@ -22,6 +22,16 @@ npm run preview
 
 The build fixes `NODE_ENV=production` before loading Vite, independently of the terminal environment. It checks the frontend and bundled component types and emits `dist/index.html` and assets. `npm run preview` serves this output locally. Reuse passing checks while source is unchanged; no additional unit-test suite or browser QA is required by the template.
 
+On Windows, `start-dev.bat` starts the dev server using the bundled Node 22 in `.tools/` (the project requires Node 22.x, so a system Node 24 will fail the engine guard).
+
+## Live demo (scream detection)
+
+Route `/live-demo` is an on-device scream detector. It captures the microphone with an `AudioWorklet` (ScriptProcessor fallback), classifies sound with MediaPipe YAMNet, and when a scream is detected runs a 10-second "Are you OK?" countdown that fires a simulated SOS panel with a Web Audio siren if not cancelled. A sensitivity slider sets the trigger threshold (0.3–0.8) and a 30s cooldown prevents re-triggering.
+
+All audio is processed locally in the browser — nothing is recorded or uploaded, and there is no backend for this page. The MediaPipe runtime loads from the jsDelivr CDN; the YAMNet model is bundled at `public/models/yamnet.tflite` and the audio worklet at `public/worklets/mic-processor.js`. Source: `src/pages/LiveDemo.tsx`, `src/hooks/useScreamDetector.ts`, `src/lib/siren.ts`. Client-side routing is hand-rolled in `src/router.tsx`, and `vercel.json` provides the SPA fallback so the deep link resolves.
+
+Detection uses a general-purpose sound model and is not guaranteed; use the in-page "Simulate scream" button to walk the countdown → SOS → reset flow without a microphone.
+
 ## Optional Function
 
 The default page is entirely static and does not call a Function. For server behavior, adapt the public, credential-free example in `functions/handler.ts`. `functions/index.ts` is the Deno deployment entry point. With Deno installed, use a separate terminal:
@@ -44,7 +54,7 @@ Use Vite's actual port if it differs. The same frontend request after deployment
 Open a local conversation in this project and follow the `sites-hosting` skill. Workspace registration is optional. Use the directory returned by `get_local_context` with:
 
 - `webDirectory: "dist"` after the build.
-- `spa: false` for the default single page; use `true` when adding client-side deep routes that need fallback.
+- `spa: true` — required, since `/live-demo` is a client-side deep route that needs the fallback.
 - `functionDirectory: "functions"` only if the application uses the Function. Omit it for static-only delivery.
 
 The Sites tools prepare artifacts and generate the publication descriptor; publish completed hosted work by default, unless the user explicitly requests a preview first or defers publication. Do not upload the project root, `node_modules`, `dev`, or source as the web artifact. A successful build or release does not prove an external integration works.
