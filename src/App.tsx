@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ApiError, requestJson } from "@/lib/api";
 import { Link } from "./router";
+import { useSession } from "./lib/auth";
+import { AccountMenu, logOut } from "./components/account-menu";
 import mascot from "./assets/mascot.jpg";
 
 /* ---------------------------------- icons --------------------------------- */
@@ -578,6 +580,7 @@ function Logo() {
 
 function Nav() {
   const [open, setOpen] = useState(false);
+  const session = useSession();
   const links: { href: string; label: string; route?: boolean }[] = [
     { href: "#how", label: "How it works" },
     { href: "#ecosystem", label: "Ecosystem" },
@@ -603,6 +606,9 @@ function Nav() {
           <a href="#join" className="hidden sm:block">
             <span className="micro inline-block rounded-full bg-brand-yellow px-5 py-2.5 font-extrabold text-brand-ink transition hover:bg-[#e6bf00]">Join waitlist</span>
           </a>
+          <div className="hidden lg:block">
+            <AccountMenu />
+          </div>
           <button type="button" aria-label="Toggle menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}
             className="grid size-10 place-items-center rounded-lg text-white lg:hidden">
             <svg viewBox="0 0 24 24" className="size-6" fill="none" aria-hidden="true">
@@ -628,6 +634,18 @@ function Nav() {
             <a href="#join" onClick={() => setOpen(false)} className="mt-2">
               <span className="micro block rounded-full bg-brand-yellow px-5 py-3 text-center font-extrabold text-brand-ink">Join waitlist</span>
             </a>
+            <div className="mt-4 border-t-2 border-white/15 pt-3">
+              <p className="micro px-3 text-white/45">Signed in</p>
+              <p className="mt-1 truncate px-3 font-extrabold text-white">{session?.who ?? "SafeHer member"}</p>
+              <Link to="/account" onClick={() => setOpen(false)}
+                className="micro mt-2 block rounded-lg px-3 py-3 text-white/80 transition hover:bg-white/10 hover:text-brand-yellow">
+                My account
+              </Link>
+              <button type="button" onClick={() => { setOpen(false); logOut(); }}
+                className="micro mt-1 block w-full rounded-lg px-3 py-3 text-left text-brand-yellow transition hover:bg-white/10">
+                Log out
+              </button>
+            </div>
           </nav>
         </div>
       )}
