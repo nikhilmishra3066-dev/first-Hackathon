@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ApiError, requestJson } from "@/lib/api";
+import { Link } from "./router";
 import mascot from "./assets/mascot.jpg";
 
 /* ---------------------------------- icons --------------------------------- */
@@ -577,21 +578,26 @@ function Logo() {
 
 function Nav() {
   const [open, setOpen] = useState(false);
-  const links = [
+  const links: { href: string; label: string; route?: boolean }[] = [
     { href: "#how", label: "How it works" },
     { href: "#ecosystem", label: "Ecosystem" },
     { href: "#plans", label: "Plans" },
     { href: "#help", label: "Help near you" },
     { href: "#partners", label: "Partners" },
+    { href: "/live-demo", label: "Live demo", route: true },
   ];
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-brand-ink">
       <div className="mx-auto flex h-15 max-w-6xl items-center justify-between px-5">
         <Logo />
         <nav className="hidden items-center gap-7 lg:flex">
-          {links.map((l) => (
-            <a key={l.href} href={l.href} className="micro text-white/75 transition hover:text-brand-yellow">{l.label}</a>
-          ))}
+          {links.map((l) =>
+            l.route ? (
+              <Link key={l.href} to={l.href} className="micro text-white/75 transition hover:text-brand-yellow">{l.label}</Link>
+            ) : (
+              <a key={l.href} href={l.href} className="micro text-white/75 transition hover:text-brand-yellow">{l.label}</a>
+            ),
+          )}
         </nav>
         <div className="flex items-center gap-2">
           <a href="#join" className="hidden sm:block">
@@ -610,10 +616,15 @@ function Nav() {
       {open && (
         <div className="border-t-2 border-white/15 bg-brand-ink px-5 py-4 lg:hidden">
           <nav className="flex flex-col gap-1">
-            {links.map((l) => (
-              <a key={l.href} href={l.href} onClick={() => setOpen(false)}
-                className="micro rounded-lg px-3 py-3 text-white/80 transition hover:bg-white/10 hover:text-brand-yellow">{l.label}</a>
-            ))}
+            {links.map((l) =>
+              l.route ? (
+                <Link key={l.href} to={l.href} onClick={() => setOpen(false)}
+                  className="micro rounded-lg px-3 py-3 text-white/80 transition hover:bg-white/10 hover:text-brand-yellow">{l.label}</Link>
+              ) : (
+                <a key={l.href} href={l.href} onClick={() => setOpen(false)}
+                  className="micro rounded-lg px-3 py-3 text-white/80 transition hover:bg-white/10 hover:text-brand-yellow">{l.label}</a>
+              ),
+            )}
             <a href="#join" onClick={() => setOpen(false)} className="mt-2">
               <span className="micro block rounded-full bg-brand-yellow px-5 py-3 text-center font-extrabold text-brand-ink">Join waitlist</span>
             </a>
