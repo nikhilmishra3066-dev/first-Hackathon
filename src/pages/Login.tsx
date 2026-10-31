@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
 import mascot from "../assets/mascot.jpg";
 import { navigate } from "../router";
 import { saveSession, type LoginMethod } from "../lib/auth";
@@ -21,6 +30,27 @@ function cleanMobile(value: string): string {
 function formatWho(method: LoginMethod, value: string): string {
   if (method === "email") return value.toLowerCase();
   return `+91 ${value.slice(0, 5)} ${value.slice(5)}`;
+}
+
+const OTP_TTL_MS = 2 * 60 * 1000;
+const OTP_RESEND_MS = 30 * 1000;
+
+function generateCode(): string {
+  const buffer = new Uint32Array(1);
+  crypto.getRandomValues(buffer);
+  return String(buffer[0] % 1_000_000).padStart(6, "0");
+}
+
+function maskTarget(method: LoginMethod, value: string): string {
+  if (method === "email") {
+    const [local, domain] = value.split("@");
+    return `${local.slice(0, 2)}${"•".repeat(Math.max(3, local.length - 2))}@${domain}`;
+  }
+  return `+91 ${value.slice(0, 2)}•••• ${value.slice(-4)}`;
+}
+
+function formatSeconds(total: number): string {
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 /** Feathered mascot crops nudged toward the pointer so her eyes follow it. */
@@ -161,6 +191,7 @@ function useGaze(visualRef: RefObject<HTMLElement | null>, imgRef: RefObject<HTM
 
 export default function Login() {
   const [method, setMethod] = useState<LoginMethod>("email");
+  const [step, setStep] = useState<"credentials" | "otp" | "success">("credentials");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -169,6 +200,12 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [who, setWho] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [digits, setDigits] = useState<string[]>(() => Array(6).fill(""));
+  const [expiresAt, setExpiresAt] = useState(0);
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const [otpInvalid, setOtpInvalid] = useState(false);
   const [invalid, setInvalid] = useState<{ identifier: boolean; password: boolean }>({
     identifier: false,
     password: false,
@@ -177,6 +214,7 @@ export default function Login() {
   const memory = useRef<Record<LoginMethod, string>>({ email: "", mobile: "" });
   const pending = useRef<{ who: string; method: LoginMethod; remember: boolean } | null>(null);
   const redirectTimer = useRef(0);
+  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const visualRef = useRef<HTMLElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -193,10 +231,19 @@ export default function Login() {
   useEffect(() => () => window.clearTimeout(redirectTimer.current), []);
 
   useEffect(() => {
-    if (!who && window.matchMedia("(pointer: fine)").matches) {
+    if (step === "otp") {
+      setNow(Date.now());
+      const timer = window.setInterval(() => setNow(Date.now()), 1000);
+      return () => window.clearInterval(timer);
+    }
+    if (step === "credentials" && window.matchMedia("(pointer: fine)").matches) {
       document.getElementById("identifier")?.focus();
     }
-  }, [who]);
+  }, [step]);
+
+  useEffect(() => {
+    if (step === "otp") otpRefs.current[0]?.focus();
+  }, [step]);
 
   function switchMethod(next: LoginMethod) {
     if (next === method) return;
@@ -267,13 +314,130 @@ export default function Login() {
 
     const signedInAs = formatWho(method, value);
     pending.current = { who: signedInAs, method, remember };
+    setWho(signedInAs);
 
     window.setTimeout(() => {
+      const startedAt = Date.now();
       setBusy(false);
-      setWho(signedInAs);
-      redirectTimer.current = window.setTimeout(finish, 1800);
+      setCode(generateCode());
+      setDigits(Array(6).fill(""));
+      setExpiresAt(startedAt + OTP_TTL_MS);
+      setResendAt(startedAt + OTP_RESEND_MS);
+      setNow(startedAt);
+      setOtpInvalid(false);
+      setStep("otp");
     }, 900);
   }
+
+  function onVerify(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setError(null);
+
+    if (Date.now() >= expiresAt) {
+      setError("That code expired. Resend a new one.");
+      return;
+    }
+
+    const entered = digits.join("");
+    if (entered.length < 6) {
+      setError("Enter the 6-digit code.");
+      return;
+    }
+    if (entered !== code) {
+      setError("That code doesn’t match. Check and try again.");
+      setOtpInvalid(true);
+      setDigits(Array(6).fill(""));
+      otpRefs.current[0]?.focus();
+      return;
+    }
+
+    setBusy(true);
+    window.setTimeout(() => {
+      setBusy(false);
+      setStep("success");
+      redirectTimer.current = window.setTimeout(finish, 1800);
+    }, 700);
+  }
+
+  function resendCode() {
+    const startedAt = Date.now();
+    if (startedAt < resendAt || busy) return;
+    setCode(generateCode());
+    setDigits(Array(6).fill(""));
+    setExpiresAt(startedAt + OTP_TTL_MS);
+    setResendAt(startedAt + OTP_RESEND_MS);
+    setNow(startedAt);
+    setError(null);
+    setOtpInvalid(false);
+    otpRefs.current[0]?.focus();
+  }
+
+  function changeAccount() {
+    setStep("credentials");
+    setDigits(Array(6).fill(""));
+    setCode("");
+    setError(null);
+    setNote(null);
+    setOtpInvalid(false);
+    setBusy(false);
+  }
+
+  function onDigitChange(index: number, raw: string) {
+    const only = raw.replace(/\D/g, "");
+    setError(null);
+    setOtpInvalid(false);
+
+    const next = [...digits];
+    if (!only) {
+      next[index] = "";
+      setDigits(next);
+      return;
+    }
+    const chars = only.slice(0, 6 - index).split("");
+    chars.forEach((char, offset) => {
+      next[index + offset] = char;
+    });
+    setDigits(next);
+    const last = Math.min(5, index + chars.length - 1);
+    otpRefs.current[last]?.focus();
+    otpRefs.current[last]?.select();
+  }
+
+  function onOtpKeyDown(index: number, event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Backspace" && !digits[index] && index > 0) {
+      event.preventDefault();
+      const next = [...digits];
+      next[index - 1] = "";
+      setDigits(next);
+      otpRefs.current[index - 1]?.focus();
+    } else if (event.key === "ArrowLeft" && index > 0) {
+      event.preventDefault();
+      otpRefs.current[index - 1]?.focus();
+    } else if (event.key === "ArrowRight" && index < 5) {
+      event.preventDefault();
+      otpRefs.current[index + 1]?.focus();
+    }
+  }
+
+  function onOtpPaste(event: ClipboardEvent<HTMLInputElement>) {
+    const text = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!text) return;
+    event.preventDefault();
+    const next = Array(6).fill("") as string[];
+    text.split("").forEach((char, index) => {
+      next[index] = char;
+    });
+    setDigits(next);
+    setError(null);
+    setOtpInvalid(false);
+    const last = Math.min(5, text.length - 1);
+    otpRefs.current[last]?.focus();
+    otpRefs.current[last]?.select();
+  }
+
+  const secondsLeft = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const resendLeft = Math.max(0, Math.ceil((resendAt - now) / 1000));
 
   return (
     <div className={styles.root}>
@@ -316,7 +480,7 @@ export default function Login() {
                 <span className={`poster ${styles["logo-type"]}`}>SafeHer</span>
               </div>
 
-              {who ? (
+              {step === "success" ? (
                 <div className={styles.success} aria-live="polite">
                   <span className={styles["success-mark"]} aria-hidden="true">
                     <svg viewBox="0 0 24 24" fill="none">
@@ -334,13 +498,95 @@ export default function Login() {
                     </svg>
                   </button>
                 </div>
+              ) : step === "otp" ? (
+                <>
+                  <header className={styles["card-head"]}>
+                    <h1 className={`poster ${styles["card-title"]}`}>
+                      {method === "email" ? (
+                        <>Check your <span>inbox.</span></>
+                      ) : (
+                        <>Check your <span>phone.</span></>
+                      )}
+                    </h1>
+                    <p className={styles["card-sub"]}>
+                      We sent a 6-digit code to <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
+                    </p>
+                  </header>
+
+                  <form className={styles.form} onSubmit={onVerify} noValidate>
+                    <div
+                      className={`${styles.otp} ${otpInvalid ? styles["is-invalid"] : ""}`}
+                      role="group"
+                      aria-label="One-time code"
+                    >
+                      {digits.map((digit, index) => (
+                        <input
+                          key={index}
+                          ref={(el) => {
+                            otpRefs.current[index] = el;
+                          }}
+                          className={styles["otp-box"]}
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete={index === 0 ? "one-time-code" : "off"}
+                          maxLength={1}
+                          value={digit}
+                          aria-label={`Digit ${index + 1} of 6`}
+                          onChange={(e) => onDigitChange(index, e.target.value)}
+                          onKeyDown={(e) => onOtpKeyDown(index, e)}
+                          onPaste={onOtpPaste}
+                          onFocus={(e) => e.currentTarget.select()}
+                        />
+                      ))}
+                    </div>
+
+                    <p className={styles.hint}>
+                      {secondsLeft > 0
+                        ? `Code expires in ${formatSeconds(secondsLeft)}.`
+                        : "Code expired — resend a new one."}
+                    </p>
+
+                    {error && (
+                      <p className={styles.error} role="alert">
+                        {error}
+                      </p>
+                    )}
+                    <p className={styles.note} role="status">
+                      Demo mode: your code is <strong>{code}</strong>. Nothing is sent to a real inbox.
+                    </p>
+
+                    <button className={styles.submit} type="submit" disabled={busy}>
+                      {busy && <span className={styles.spinner} aria-hidden="true" />}
+                      <span>{busy ? "Verifying…" : "Verify & sign in"}</span>
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+
+                    <div className={styles["otp-actions"]}>
+                      <button type="button" disabled={resendLeft > 0 || busy} onClick={resendCode}>
+                        {resendLeft > 0 ? `Resend in ${resendLeft}s` : "Resend code"}
+                      </button>
+                      <button type="button" onClick={changeAccount}>
+                        Change {method === "email" ? "email" : "number"}
+                      </button>
+                    </div>
+
+                    <a className={styles.emergency} href="tel:112">
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M6.5 3h3l1.4 4.1-2 1.5a13.3 13.3 0 0 0 5.5 5.5l1.5-2L20 13.5v3A3.5 3.5 0 0 1 16.5 20 13.5 13.5 0 0 1 4 7.5 3.5 3.5 0 0 1 6.5 3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+                      </svg>
+                      Emergency? Call 112
+                    </a>
+                  </form>
+                </>
               ) : (
                 <>
                   <header className={styles["card-head"]}>
                     <h1 className={`poster ${styles["card-title"]}`}>
                       Welcome <span>back.</span>
                     </h1>
-                    <p className={styles["card-sub"]}>Use your email address or mobile number to continue.</p>
+                    <p className={styles["card-sub"]}>Use your email address or mobile number. We’ll text or email a one-time code to verify it’s you.</p>
                   </header>
 
                   <div className={styles.tabs} role="group" aria-label="Choose login method">
@@ -446,7 +692,7 @@ export default function Login() {
 
                     <button className={styles.submit} type="submit" disabled={busy}>
                       {busy && <span className={styles.spinner} aria-hidden="true" />}
-                      <span>{busy ? "Signing in…" : "Sign in"}</span>
+                      <span>{busy ? "Sending code…" : "Send code"}</span>
                       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
