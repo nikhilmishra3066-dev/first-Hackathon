@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { useScreamDetector, type ErrorCode } from "../hooks/useScreamDetector";
 import { Link } from "../router";
+import { EmergencyMap } from "../components/EmergencyMap";
+import { EmergencyContacts } from "../components/EmergencyContacts";
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
@@ -39,7 +42,9 @@ function Header() {
           </span>
           <span className="poster text-xl tracking-wide">SafeHer</span>
         </Link>
-        <span className="micro rounded-full bg-brand-red px-4 py-2 text-white">Live demo</span>
+        <div className="flex items-center gap-2">
+          <span className="micro rounded-full bg-brand-red px-4 py-2 text-white">Live demo</span>
+        </div>
       </div>
     </header>
   );
@@ -58,6 +63,7 @@ export default function LiveDemo() {
     countdown,
     cooldownRemaining,
     alertInfo,
+    isDispatching,
     start,
     stop,
     cancel,
@@ -65,7 +71,27 @@ export default function LiveDemo() {
     simulate,
   } = useScreamDetector();
 
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const overThreshold = screamScore >= threshold;
+
+  // Parse coordinates if available in alertInfo
+  let mapLat: number | null = null;
+  let mapLon: number | null = null;
+  if (alertInfo?.location && alertInfo.location.includes(",")) {
+    const parts = alertInfo.location.split(",").map((s) => Number(s.trim()));
+    if (Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+      mapLat = parts[0];
+      mapLon = parts[1];
+    }
+  }
+
+  const handleCopyTracking = () => {
+    if (!alertInfo?.trackingUrl) return;
+    void navigator.clipboard.writeText(alertInfo.trackingUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
 
   return (
     <div className="min-h-svh bg-brand-bone text-brand-ink">
@@ -75,14 +101,14 @@ export default function LiveDemo() {
         {/* Heading */}
         <div className="text-center">
           <span className="micro inline-block rounded-full bg-brand-ink px-4 py-2 text-brand-yellow">
-            On-device · No upload
+            On-device · Instant Dispatch
           </span>
           <h1 className="poster mt-5 text-5xl leading-[0.95] sm:text-6xl">
             Scream <span className="text-brand-red">detection</span> demo
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-lg font-medium text-brand-ink/75">
-            Your microphone listens for a scream. If one is detected, a 10-second "Are you OK?"
-            countdown starts. Cancel it, or a simulated SOS alert fires.
+            Your microphone listens for a scream or distress sound. If one is detected, a 10-second "Are you OK?"
+            countdown starts. Cancel it, or real emergency SOS alerts fly to your trusted circle.
           </p>
         </div>
 
@@ -110,23 +136,29 @@ export default function LiveDemo() {
           <div className="mx-auto mt-10 max-w-xl">
             <div className="blk sh-ink rounded-2xl bg-brand-white p-8 text-center">
               <button type="button" onClick={start}
-                className="micro sh-ink-sm inline-flex items-center gap-2.5 rounded-full bg-brand-red px-9 py-4 font-extrabold text-white transition hover:-translate-y-0.5">
+                className="micro sh-ink-sm inline-flex items-center gap-2.5 rounded-full bg-brand-red px-9 py-4 font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-[#c81c15]">
                 <span className="relative flex size-2.5">
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-white opacity-80" />
                   <span className="relative inline-flex size-2.5 rounded-full bg-white" />
                 </span>
                 Start listening
               </button>
-              <button type="button" onClick={simulate}
-                className="micro mt-4 block w-full rounded-full border-[3px] border-brand-ink px-7 py-3.5 font-extrabold text-brand-ink transition hover:bg-brand-yellow">
-                Simulate scream (jump to countdown)
-              </button>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button type="button" onClick={simulate}
+                  className="micro rounded-full border-[3px] border-brand-ink px-6 py-3.5 font-extrabold text-brand-ink transition hover:bg-brand-yellow">
+                  Simulate scream
+                </button>
+                <button type="button" onClick={simulate}
+                  className="micro rounded-full border-[3px] border-brand-red bg-brand-bone px-6 py-3.5 font-extrabold text-brand-red transition hover:bg-brand-red hover:text-white">
+                  Manual SOS test
+                </button>
+              </div>
               <p className="mt-6 rounded-xl bg-brand-ink px-5 py-4 text-sm font-extrabold text-white">
-                Audio is processed on your device. Nothing is recorded or uploaded.
+                Audio is processed locally on your device. Nothing is recorded or uploaded to the cloud.
               </p>
             </div>
             <p className="micro mt-5 text-center text-brand-ink/60">
-              Demo uses a general-purpose sound model. Detection is not guaranteed.
+              Uses high-accuracy on-device YAMNet classification. Distress classes: screams, yells, shrieks, gunshots.
             </p>
           </div>
         )}
@@ -160,7 +192,7 @@ export default function LiveDemo() {
 
               <div className="mt-6 space-y-1.5">
                 <div className="micro flex justify-between text-brand-ink/70">
-                  <span>Scream score</span>
+                  <span>Distress score</span>
                   <span>{Math.round(screamScore * 100)}%</span>
                 </div>
                 <Meter value={screamScore / 0.8} color={overThreshold ? "#e7221a" : "#ffd400"} />
@@ -207,7 +239,7 @@ export default function LiveDemo() {
                 <span>Fewer false alarms</span>
               </div>
               <p className="mt-3 text-sm font-medium text-brand-ink/70">
-                Triggers when the scream score is at or above this in 3 of the last ~4 readings.
+                Triggers when the distress score is at or above this in 3 of the last ~4 readings with active energy.
               </p>
             </div>
 
@@ -217,12 +249,12 @@ export default function LiveDemo() {
                 Simulate scream
               </button>
               <button type="button" onClick={stop}
-                className="micro sh-ink-sm rounded-full bg-brand-ink px-8 py-3.5 font-extrabold text-brand-yellow transition hover:-translate-y-0.5">
+                className="micro sh-ink-sm rounded-full bg-brand-ink px-8 py-3.5 font-extrabold text-brand-yellow transition hover:-translate-y-0.5 hover:bg-black">
                 Stop
               </button>
             </div>
             <p className="micro text-center text-brand-ink/60">
-              Demo uses a general-purpose sound model. Detection is not guaranteed.
+              Demo uses on-device sound model. Audio remains strictly local on your device.
             </p>
           </div>
         )}
@@ -235,10 +267,10 @@ export default function LiveDemo() {
               {countdown}
             </div>
             <p className="mx-auto max-w-md font-medium text-white/85">
-              Cancel now, or an SOS alert will be triggered automatically.
+              Cancel now, or real emergency SOS alerts with your live location will be dispatched to your trusted contacts.
             </p>
             <button type="button" onClick={cancel}
-              className="micro sh-ink-sm mt-8 inline-block rounded-full bg-brand-yellow px-12 py-5 text-lg font-extrabold text-brand-ink transition hover:-translate-y-0.5">
+              className="micro sh-ink-sm mt-8 inline-block rounded-full bg-brand-yellow px-12 py-5 text-lg font-extrabold text-brand-ink transition hover:-translate-y-0.5 hover:bg-[#e6bf00]">
               I'm OK — cancel
             </button>
           </div>
@@ -247,11 +279,25 @@ export default function LiveDemo() {
         {/* ALERT */}
         {phase === "alert" && (
           <div className="blk sh-ink mt-10 rounded-2xl bg-brand-ink p-8 text-center text-white sm:p-12">
-            <span className="micro inline-block rounded-full bg-brand-red px-4 py-2 text-white">Emergency</span>
+            <div className="flex items-center justify-center gap-2">
+              <span className="size-3 animate-ping rounded-full bg-brand-red" />
+              <span className="micro inline-block rounded-full bg-brand-red px-4 py-2 text-white">
+                Emergency Active
+              </span>
+            </div>
             <h2 className="poster mt-5 text-5xl text-brand-yellow sm:text-6xl">SOS triggered</h2>
-            <p className="mt-3 font-medium text-white/80">Siren active. This is a simulated alert.</p>
+            <p className="mt-3 font-medium text-white/80">
+              Siren active. Alerts dispatched to trusted contacts.
+            </p>
 
-            <div className="mx-auto mt-8 grid max-w-lg gap-4 text-left sm:grid-cols-2">
+            {/* Live GPS Map */}
+            {mapLat !== null && mapLon !== null && (
+              <div className="mt-8 text-left">
+                <EmergencyMap lat={mapLat} lon={mapLon} accuracy={15} isLive={true} height="280px" />
+              </div>
+            )}
+
+            <div className="mx-auto mt-6 grid max-w-lg gap-4 text-left sm:grid-cols-2">
               <div className="rounded-xl border-[3px] border-white/25 bg-white/5 p-4">
                 <div className="micro text-white/60">Time</div>
                 <div className="poster mt-1 text-xl text-white">{alertInfo?.time ?? "—"}</div>
@@ -259,21 +305,58 @@ export default function LiveDemo() {
               <div className="rounded-xl border-[3px] border-white/25 bg-white/5 p-4">
                 <div className="micro text-white/60">Location</div>
                 <div className="poster mt-1 break-words text-lg text-white">
-                  {alertInfo?.location ?? "Not shared"}
+                  {alertInfo?.location ?? "GPS reading..."}
                 </div>
               </div>
             </div>
 
+            {/* Tracking URL */}
+            {alertInfo?.trackingUrl && (
+              <div className="mx-auto mt-6 flex max-w-lg flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-brand-yellow bg-white/5 p-3 text-left">
+                <div className="min-w-0 flex-1">
+                  <span className="micro text-brand-yellow">Live Tracking URL</span>
+                  <span className="block truncate font-mono text-xs text-white/70">{alertInfo.trackingUrl}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyTracking}
+                  className="micro rounded-full bg-brand-yellow px-4 py-2 font-extrabold text-brand-ink hover:bg-[#e6bf00]"
+                >
+                  {copiedLink ? "✓ Copied" : "Copy Link"}
+                </button>
+              </div>
+            )}
+
+            {/* Dispatched Alerts Summary */}
+            {alertInfo?.alerts && alertInfo.alerts.length > 0 && (
+              <div className="mx-auto mt-6 max-w-lg space-y-2 text-left">
+                <span className="micro text-white/60">Notifications Delivered:</span>
+                {alertInfo.alerts.map((al) => (
+                  <div key={al.id} className="flex items-center justify-between rounded-xl bg-white/10 px-4 py-2.5 text-sm">
+                    <span className="font-bold text-white">{al.recipient_name} ({al.channel.toUpperCase()})</span>
+                    <span className="micro rounded-full bg-brand-yellow px-2 py-0.5 text-brand-ink font-bold">
+                      {al.status.toUpperCase()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <p className="mx-auto mt-6 max-w-md rounded-xl bg-brand-yellow px-5 py-4 font-extrabold text-brand-ink">
-              Nearby verified volunteers notified (demo).
+              {isDispatching ? "Dispatching emergency alerts..." : "Nearby verified volunteers & contacts pinged."}
             </p>
 
             <button type="button" onClick={reset}
-              className="micro sh-ink-sm mt-8 inline-block rounded-full bg-brand-white px-10 py-4 font-extrabold text-brand-ink transition hover:-translate-y-0.5">
+              className="micro sh-ink-sm mt-8 inline-block rounded-full bg-brand-white px-10 py-4 font-extrabold text-brand-ink transition hover:-translate-y-0.5 hover:bg-brand-bone">
               Reset (stop siren)
             </button>
           </div>
         )}
+
+        {/* Emergency Contacts Section on Demo Page */}
+        <section className="mt-16 border-t-4 border-brand-ink pt-12">
+          <EmergencyContacts />
+        </section>
       </main>
     </div>
   );

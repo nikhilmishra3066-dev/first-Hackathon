@@ -8,6 +8,8 @@ import { Link } from "./router";
 import { useSession } from "./lib/auth";
 import { AccountMenu, logOut } from "./components/account-menu";
 import mascot from "./assets/mascot.jpg";
+import { SosModal } from "./components/SosModal";
+import { EmergencyContacts } from "./components/EmergencyContacts";
 
 /* ---------------------------------- icons --------------------------------- */
 const Icon = {
@@ -578,12 +580,13 @@ function Logo() {
   );
 }
 
-function Nav() {
+function Nav({ onOpenSos }: { onOpenSos?: () => void }) {
   const [open, setOpen] = useState(false);
   const session = useSession();
   const links: { href: string; label: string; route?: boolean }[] = [
     { href: "#how", label: "How it works" },
     { href: "#ecosystem", label: "Ecosystem" },
+    { href: "#contacts", label: "Trusted circle" },
     { href: "#plans", label: "Plans" },
     { href: "#help", label: "Help near you" },
     { href: "#partners", label: "Partners" },
@@ -603,6 +606,17 @@ function Nav() {
           )}
         </nav>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenSos}
+            className="micro inline-flex items-center gap-1.5 rounded-full bg-brand-red px-3.5 py-2 font-extrabold text-white transition hover:-translate-y-0.5 hover:bg-[#c81c15] shadow-[2px_2px_0_#ffd400]"
+          >
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-white opacity-80" />
+              <span className="relative inline-flex size-2 rounded-full bg-white" />
+            </span>
+            SOS Emergency
+          </button>
           <a href="#join" className="hidden sm:block">
             <span className="micro inline-block rounded-full bg-brand-yellow px-5 py-2.5 font-extrabold text-brand-ink transition hover:bg-[#e6bf00]">Join waitlist</span>
           </a>
@@ -622,6 +636,13 @@ function Nav() {
       {open && (
         <div className="border-t-2 border-white/15 bg-brand-ink px-5 py-4 lg:hidden">
           <nav className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onOpenSos?.(); }}
+              className="micro flex items-center justify-center gap-2 rounded-full bg-brand-red px-5 py-3 font-extrabold text-white mb-2"
+            >
+              🚨 Trigger SOS Emergency
+            </button>
             {links.map((l) =>
               l.route ? (
                 <Link key={l.href} to={l.href} onClick={() => setOpen(false)}
@@ -669,7 +690,7 @@ function Ticker() {
 }
 
 /* ---------------------------------- hero ---------------------------------- */
-function Hero() {
+function Hero({ onOpenSos }: { onOpenSos?: () => void }) {
   return (
     <section id="top" className="relative overflow-hidden bg-brand-red pt-15 text-white">
       <div className="persp relative mx-auto max-w-6xl px-5 pb-14 pt-8">
@@ -701,6 +722,13 @@ function Hero() {
               A smart wearable, an AI app and a verified volunteer network — working together so help reaches women faster.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={onOpenSos}
+                className="micro sh-ink-sm inline-flex items-center gap-2 rounded-full bg-brand-yellow px-7 py-4 font-extrabold text-brand-ink transition hover:-translate-y-0.5 hover:bg-[#e6bf00]"
+              >
+                🚨 One-tap SOS
+              </button>
               <a href="#join" className="micro sh-ink-sm inline-block rounded-full bg-brand-white px-7 py-4 font-extrabold text-brand-ink transition hover:-translate-y-0.5">
                 Join the waitlist
               </a>
@@ -717,13 +745,14 @@ function Hero() {
 
 /* ---------------------------------- app ----------------------------------- */
 export default function App() {
+  const [sosOpen, setSosOpen] = useState(false);
   useReveal();
   useCursorScene();
 
   return (
     <div className="bg-brand-bone text-brand-ink">
-      <Nav />
-      <Hero />
+      <Nav onOpenSos={() => setSosOpen(true)} />
+      <Hero onOpenSos={() => setSosOpen(true)} />
       <Ticker />
 
       {/* PROBLEM */}
@@ -868,6 +897,18 @@ export default function App() {
         </div>
       </section>
 
+      {/* TRUSTED CIRCLE / EMERGENCY CONTACTS */}
+      <section id="contacts" className="bg-brand-bone py-24 sm:py-28">
+        <div className="mx-auto max-w-5xl px-5">
+          <SectionHead kicker="Safety circle"
+            title={<>Your trusted contacts, <span className="text-brand-red">instantly alerted.</span></>}
+            sub="Add family members, hostel roommates or security personnel. When you trigger SOS or distress sounds are detected, they receive instant alerts and live GPS tracking." />
+          <div className="r3d">
+            <EmergencyContacts />
+          </div>
+        </div>
+      </section>
+
       <HelpNearYou />
 
       {/* PARTNERS */}
@@ -905,6 +946,8 @@ export default function App() {
           </p>
         </div>
       </footer>
+
+      <SosModal isOpen={sosOpen} onClose={() => setSosOpen(false)} triggerSource="manual" />
     </div>
   );
 }

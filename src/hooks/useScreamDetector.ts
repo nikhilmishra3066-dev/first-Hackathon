@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { beep, closeAudioContext, startSiren, stopSiren } from "../lib/siren";
+import { requestJson } from "@/lib/api";
 
 /* ------------------------------- types ---------------------------------- */
 export type Phase = "idle" | "loading" | "listening" | "countdown" | "alert" | "error";
@@ -32,23 +33,49 @@ interface MediaPipeModule {
 export interface AlertInfo {
   time: string;
   location: string | null;
+  sessionId?: string;
+  trackingUrl?: string;
+  contactsNotified?: number;
+  alerts?: Array<{
+    id: string;
+    channel: string;
+    destination: string;
+    status: string;
+    recipient_name: string;
+  }>;
 }
 
 /* ------------------------------ constants -------------------------------- */
-// MediaPipe tasks-audio is loaded from a CDN at runtime (npm registry is unavailable here).
-// The URL is held in a variable so Vite leaves the dynamic import alone and TS treats it as any.
 const MP_VERSION = "1.2.0";
 const MP_BUNDLE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@${MP_VERSION}/audio_bundle.mjs`;
 const MP_WASM = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-audio@${MP_VERSION}/wasm`;
-// Local model first (bundled in /public), remote as fallback.
 const MODEL_LOCAL = "/models/yamnet.tflite";
 const MODEL_REMOTE =
   "https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/1/yamnet.tflite";
 const WORKLET_URL = "/worklets/mic-processor.js";
 
 const SAMPLE_RATE = 16000;
-// Only these YAMNet classes count as a scream; score = highest among them.
-const SCREAM_LABELS = new Set(["screaming", "yell", "shout", "children shouting"]);
+
+// Expanded distress categories from YAMNet ontology:
+// screams, shouts, shrieks, distress calls, crying, wailing, gunshots
+const DISTRESS_LABELS = new Set([
+  "screaming",
+  "yell",
+  "shout",
+  "screaming, shrieking",
+  "children shouting",
+  "crying, sobbing",
+  "wail",
+  "groan",
+  "whimper",
+  "gunshot, gunfire",
+  "explosion",
+]);
+
+// Minimum RMS amplitude required to trigger classification, preventing
+// false positives during room silence or subtle background hum.
+const MIN_RMS_THRESHOLD = 0.035;
+
 const TRIGGER_WINDOW = 4; // look at the last 4 results (~2s)
 const TRIGGER_MIN = 3; // ...need 3 of them over threshold
 const COOLDOWN_MS = 30_000;
@@ -83,20 +110,30 @@ async function loadClassifier(): Promise<AudioClassifier> {
 }
 
 /* -------------------------------- hook ----------------------------------- */
-export function useScreamDetector() {
+export function useScreamDetector(options?: {
+  onAlertTriggered?: (info: AlertInfo) => void;
+  autoPersistThreshold?: boolean;
+}) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [errorCode, setErrorCode] = useState<ErrorCode>(null);
   const [level, setLevel] = useState(0);
   const [topLabel, setTopLabel] = useState("");
   const [topScore, setTopScore] = useState(0);
   const [screamScore, setScreamScore] = useState(0);
-  const [threshold, setThresholdState] = useState(0.5);
+  const [threshold, setThresholdState] = useState(() => {
+    try {
+      const saved = localStorage.getItem("safeher:sensitivity");
+      if (saved) return Math.max(0.3, Math.min(0.8, Number(saved)));
+    } catch {}
+    return 0.5;
+  });
   const [countdown, setCountdown] = useState(COUNTDOWN_SEC);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [alertInfo, setAlertInfo] = useState<AlertInfo | null>(null);
+  const [isDispatching, setIsDispatching] = useState(false);
 
   const phaseRef = useRef<Phase>("idle");
-  const thresholdRef = useRef(0.5);
+  const thresholdRef = useRef(threshold);
   const historyRef = useRef<number[]>([]);
   const cooldownUntilRef = useRef(0);
 
@@ -109,7 +146,6 @@ export function useScreamDetector() {
 
   const countdownTimerRef = useRef<number | null>(null);
   const cooldownTimerRef = useRef<number | null>(null);
-  // ScriptProcessor fallback accumulator.
   const spAccumRef = useRef<{ chunks: Float32Array[]; count: number }>({ chunks: [], count: 0 });
 
   const go = useCallback((next: Phase) => {
@@ -121,6 +157,9 @@ export function useScreamDetector() {
     const v = Math.max(0.3, Math.min(0.8, value));
     thresholdRef.current = v;
     setThresholdState(v);
+    try {
+      localStorage.setItem("safeher:sensitivity", v.toFixed(2));
+    } catch {}
   }, []);
 
   const clearTimers = useCallback(() => {
@@ -149,31 +188,71 @@ export function useScreamDetector() {
     cooldownTimerRef.current = window.setInterval(tick, 500);
   }, []);
 
-  const triggerAlert = useCallback(() => {
+  // Real emergency alert dispatcher connected to backend
+  const triggerAlert = useCallback(async () => {
     go("alert");
     startSiren();
     const time = new Date().toLocaleTimeString();
-    setAlertInfo({ time, location: null });
-    // Only read location if permission was already granted — never prompt mid-alert.
-    const permissions = (navigator as Navigator & { permissions?: Permissions }).permissions;
-    if (navigator.geolocation && permissions?.query) {
-      permissions
-        .query({ name: "geolocation" as PermissionName })
-        .then((status) => {
-          if (status.state !== "granted") return;
-          navigator.geolocation.getCurrentPosition(
-            (pos) =>
-              setAlertInfo({
-                time,
-                location: `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`,
-              }),
-            () => {},
-            { timeout: 8000, maximumAge: 60_000 },
-          );
-        })
-        .catch(() => {});
+    const initialInfo: AlertInfo = { time, location: null };
+    setAlertInfo(initialInfo);
+    setIsDispatching(true);
+
+    let locationCoords: { lat: number; lon: number; accuracy: number } | null = null;
+
+    // Retrieve GPS position if available
+    if ("geolocation" in navigator) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 6000,
+            maximumAge: 60000,
+          });
+        });
+        locationCoords = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        };
+        initialInfo.location = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
+        setAlertInfo({ ...initialInfo });
+      } catch {
+        // Geolocation optional in instant alert
+      }
     }
-  }, [go]);
+
+    // Call backend emergency trigger API
+    try {
+      const res = await requestJson("/functions/v1/app?action=sos_trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          triggerType: "scream_detection",
+          location: locationCoords,
+        }),
+      }) as {
+        ok?: boolean;
+        session?: { id: string; token: string; tracking_url: string };
+        alerts?: Array<{ id: string; channel: string; destination: string; status: string; recipient_name: string }>;
+        contactsNotified?: number;
+      };
+
+      const finalInfo: AlertInfo = {
+        time,
+        location: initialInfo.location,
+        sessionId: res?.session?.id,
+        trackingUrl: res?.session?.tracking_url,
+        contactsNotified: res?.contactsNotified || 0,
+        alerts: res?.alerts || [],
+      };
+      setAlertInfo(finalInfo);
+      options?.onAlertTriggered?.(finalInfo);
+    } catch {
+      // Offline fallback: keep siren and alert info displayed
+    } finally {
+      setIsDispatching(false);
+    }
+  }, [go, options]);
 
   const beginCountdown = useCallback(() => {
     go("countdown");
@@ -189,7 +268,7 @@ export function useScreamDetector() {
           clearInterval(countdownTimerRef.current);
           countdownTimerRef.current = null;
         }
-        triggerAlert();
+        void triggerAlert();
       } else {
         beep();
       }
@@ -200,6 +279,12 @@ export function useScreamDetector() {
     async (audio: Float32Array) => {
       const classifier = classifierRef.current;
       if (!classifier || phaseRef.current !== "listening") return;
+
+      // Noise floor and RMS energy calculation
+      let sumSq = 0;
+      for (let i = 0; i < audio.length; i++) sumSq += audio[i] * audio[i];
+      const rms = Math.sqrt(sumSq / audio.length);
+
       let result: AudioClassifierResult;
       try {
         const maybe = classifier.classify(audio, SAMPLE_RATE);
@@ -211,20 +296,26 @@ export function useScreamDetector() {
       if (categories.length === 0) return;
 
       let top: Category = categories[0];
-      let scream = 0;
+      let distress = 0;
+
       for (const c of categories) {
         const score = c.score ?? 0;
         if (score > (top.score ?? 0)) top = c;
         const label = (c.categoryName ?? "").toLowerCase();
-        if (SCREAM_LABELS.has(label) && score > scream) scream = score;
+        if (DISTRESS_LABELS.has(label) && score > distress) distress = score;
       }
+
       setTopLabel(top.categoryName ?? "");
       setTopScore(top.score ?? 0);
-      setScreamScore(scream);
+
+      // Only count distress towards trigger if audio has real energy above silence threshold
+      const effectiveDistressScore = rms >= MIN_RMS_THRESHOLD ? distress : 0;
+      setScreamScore(distress);
 
       const history = historyRef.current;
-      history.push(scream);
+      history.push(effectiveDistressScore);
       if (history.length > TRIGGER_WINDOW) history.shift();
+
       const hits = history.filter((s) => s >= thresholdRef.current).length;
       if (
         history.length >= TRIGGER_MIN &&
@@ -245,20 +336,10 @@ export function useScreamDetector() {
         if (node instanceof AudioWorkletNode) node.port.onmessage = null;
         else (node as ScriptProcessorNode).onaudioprocess = null;
         node.disconnect();
-      } catch {
-        /* ignore */
-      }
+      } catch {}
     }
-    try {
-      sourceRef.current?.disconnect();
-    } catch {
-      /* ignore */
-    }
-    try {
-      mutedRef.current?.disconnect();
-    } catch {
-      /* ignore */
-    }
+    try { sourceRef.current?.disconnect(); } catch {}
+    try { mutedRef.current?.disconnect(); } catch {}
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     const ctx = ctxRef.current;
@@ -340,7 +421,6 @@ export function useScreamDetector() {
         source.connect(node);
         nodeRef.current = node;
       } else {
-        // ScriptProcessor fallback (older browsers).
         const node = ctx.createScriptProcessor(4096, 1, 1);
         const muted = ctx.createGain();
         muted.gain.value = 0;
@@ -360,7 +440,6 @@ export function useScreamDetector() {
             }
             accum.chunks = [];
             accum.count = 0;
-            // Downsample to 16 kHz by linear interpolation.
             const ratio = ctx.sampleRate / SAMPLE_RATE;
             const outLen = Math.floor(raw.length / ratio);
             const out = new Float32Array(outLen);
@@ -403,17 +482,27 @@ export function useScreamDetector() {
     go(streamRef.current && classifierRef.current ? "listening" : "idle");
   }, [go, startCooldown]);
 
-  const reset = useCallback(() => {
+  const reset = useCallback(async () => {
     stopSiren();
     if (countdownTimerRef.current !== null) {
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+    const currentSessionId = alertInfo?.sessionId;
+    if (currentSessionId) {
+      try {
+        await requestJson("/functions/v1/app?action=sos_resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: currentSessionId }),
+        });
+      } catch {}
+    }
     setAlertInfo(null);
     historyRef.current = [];
     startCooldown();
     go(streamRef.current && classifierRef.current ? "listening" : "idle");
-  }, [go, startCooldown]);
+  }, [alertInfo?.sessionId, go, startCooldown]);
 
   const simulate = useCallback(() => {
     if (phaseRef.current === "countdown" || phaseRef.current === "alert") return;
@@ -422,7 +511,7 @@ export function useScreamDetector() {
     beginCountdown();
   }, [beginCountdown]);
 
-  // Teardown on unmount / page leave: stop mic, close contexts, stop siren.
+  // Teardown on unmount / page leave
   useEffect(() => {
     const teardown = () => {
       clearTimers();
@@ -449,6 +538,7 @@ export function useScreamDetector() {
     countdown,
     cooldownRemaining,
     alertInfo,
+    isDispatching,
     start,
     stop,
     cancel,

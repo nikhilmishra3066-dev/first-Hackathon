@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.12.0 <23"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "preinstall": "node scripts/check-node.mjs",
@@ -13,6 +13,8 @@
     "build": "tsc --noEmit && node scripts/build.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "dev:function": "deno run --allow-net=127.0.0.1:8000 dev/function-local.ts",
+    "dev:node-function": "node dev/function-local-node.mjs",
+    "test:backend": "node dev/handler-test.mjs",
     "check:function": "deno check functions/index.ts"
   },
   "dependencies": {
