@@ -194,6 +194,7 @@ export default function Login() {
   const [who, setWho] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [demoCode, setDemoCode] = useState("");
+  const [newAccount, setNewAccount] = useState(false);
   const [digits, setDigits] = useState<string[]>(() => Array(6).fill(""));
   const [expiresAt, setExpiresAt] = useState(0);
   const [resendAt, setResendAt] = useState(0);
@@ -295,8 +296,8 @@ export default function Login() {
       setIdentifier(value);
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
       setInvalid({ identifier: false, password: true });
       document.getElementById("password")?.focus();
       return;
@@ -306,13 +307,14 @@ export default function Login() {
     setBusy(true);
 
     try {
-      const delivery = await requestOtp(method, value);
+      const delivery = await requestOtp(method, value, password);
       const startedAt = Date.now();
       const signedInAs = formatWho(method, value);
       pending.current = { who: signedInAs, method, remember };
       setWho(signedInAs);
       setToken(delivery.token);
       setDemoCode(delivery.demoCode ?? "");
+      setNewAccount(delivery.newAccount);
       setDigits(Array(6).fill(""));
       setExpiresAt(startedAt + delivery.expiresIn);
       setResendAt(startedAt + delivery.resendIn);
@@ -344,7 +346,7 @@ export default function Login() {
 
     setBusy(true);
     try {
-      await confirmOtp(token, entered);
+      await confirmOtp(token, entered, password);
       setOtpInvalid(false);
       setStep("success");
       redirectTimer.current = window.setTimeout(finish, 1800);
@@ -361,6 +363,7 @@ export default function Login() {
       } else if (err instanceof OtpError && err.code === "invalid_token") {
         setToken("");
         setDemoCode("");
+        setNewAccount(false);
         setDigits(Array(6).fill(""));
         setStep("credentials");
         setError("That sign-in attempt expired. Start again.");
@@ -378,10 +381,15 @@ export default function Login() {
     setError(null);
 
     try {
-      const delivery = await requestOtp(method, method === "email" ? identifier.trim() : cleanMobile(identifier));
+      const delivery = await requestOtp(
+        method,
+        method === "email" ? identifier.trim() : cleanMobile(identifier),
+        password,
+      );
       const startedAt = Date.now();
       setToken(delivery.token);
       setDemoCode(delivery.demoCode ?? "");
+      setNewAccount(delivery.newAccount);
       setDigits(Array(6).fill(""));
       setExpiresAt(startedAt + delivery.expiresIn);
       setResendAt(startedAt + delivery.resendIn);
@@ -404,6 +412,7 @@ export default function Login() {
     setDigits(Array(6).fill(""));
     setToken("");
     setDemoCode("");
+    setNewAccount(false);
     setError(null);
     setNote(null);
     setOtpInvalid(false);
@@ -545,6 +554,7 @@ export default function Login() {
                           We sent a 6-digit code to <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
                         </>
                       )}
+                      {newAccount && <> Verifying it also creates your account with the password you just set.</>}
                     </p>
                   </header>
 
@@ -623,7 +633,7 @@ export default function Login() {
                     <h1 className={`poster ${styles["card-title"]}`}>
                       Welcome <span>back.</span>
                     </h1>
-                    <p className={styles["card-sub"]}>Use your email address or mobile number. We’ll text or email a one-time code to verify it’s you.</p>
+                    <p className={styles["card-sub"]}>Sign in with your password, then confirm the one-time code we send you. First time here? Your account is created right after you verify.</p>
                   </header>
 
                   <div className={styles.tabs} role="group" aria-label="Choose login method">
@@ -696,7 +706,7 @@ export default function Login() {
                           )}
                         </button>
                       </div>
-                      <p className={styles.hint}>At least 6 characters.</p>
+                      <p className={styles.hint}>At least 8 characters. Your password is checked before any code is sent.</p>
                     </div>
 
                     <div className={styles["meta-row"]}>
@@ -709,7 +719,7 @@ export default function Login() {
                         className={styles["link-button"]}
                         onClick={() => {
                           setError(null);
-                          setNote("Password reset isn’t live yet. Join the waitlist and we’ll email you as soon as accounts open.");
+                          setNote("Password reset isn’t live yet. If you’re locked out, contact the SafeHer team and we’ll reset it for you.");
                         }}
                       >
                         Forgot password?
@@ -746,8 +756,8 @@ export default function Login() {
               )}
 
               <footer className={styles["card-foot"]}>
-                <p>New to SafeHer? Accounts open with the campus pilot.</p>
-                <p className={`micro ${styles["demo-note"]}`}>Demo sign-in · accounts aren’t live yet</p>
+                <p>New to SafeHer? Your first sign-in creates your account.</p>
+                <p className={`micro ${styles["demo-note"]}`}>Your password is stored hashed, never as plain text</p>
               </footer>
             </div>
           </section>
@@ -758,7 +768,7 @@ export default function Login() {
             <path d="M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
             <path d="m9 12 2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Your email or number is only used to send this sign-in code.
+          Your password is stored hashed. Codes go only to your email or number.
         </p>
       </main>
     </div>

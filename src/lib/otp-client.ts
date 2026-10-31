@@ -5,6 +5,7 @@ export type OtpDelivery = {
   target: string;
   expiresIn: number;
   resendIn: number;
+  newAccount: boolean;
   demoCode?: string;
 };
 
@@ -56,19 +57,20 @@ async function post(path: string, payload: Record<string, unknown>): Promise<Rec
   return data;
 }
 
-export async function requestOtp(channel: OtpChannel, target: string): Promise<OtpDelivery> {
-  const data = await post("/api/otp-send", { channel, target });
+export async function requestOtp(channel: OtpChannel, target: string, password: string): Promise<OtpDelivery> {
+  const data = await post("/api/otp-send", { channel, target, password });
   return {
     token: String(data.token),
     target: String(data.target),
     expiresIn: Number(data.expiresIn) || 120_000,
     resendIn: Number(data.resendIn) || 30_000,
+    newAccount: data.newAccount === true,
     demoCode: typeof data.demoCode === "string" ? data.demoCode : undefined,
   };
 }
 
-export async function confirmOtp(token: string, code: string): Promise<void> {
-  await post("/api/otp-verify", { token, code });
+export async function confirmOtp(token: string, code: string, password: string): Promise<void> {
+  await post("/api/otp-verify", { token, code, password });
 }
 
 export function describeOtpError(error: unknown): string {
@@ -76,6 +78,18 @@ export function describeOtpError(error: unknown): string {
   switch (error.code) {
     case "invalid_target":
       return error.message;
+    case "invalid_credentials":
+      return "Incorrect password. Try again.";
+    case "locked":
+      return error.retryAfter && error.retryAfter > 90
+        ? `Too many wrong passwords. Try again in ${Math.ceil(error.retryAfter / 60)} minutes.`
+        : "Too many wrong passwords. Wait a moment and try again.";
+    case "weak_password":
+      return error.message;
+    case "accounts_not_configured":
+      return "Sign-in accounts aren’t set up on this deployment yet.";
+    case "accounts_unavailable":
+      return "Sign-in is temporarily unavailable. Try again in a moment.";
     case "delivery_failed":
       return error.message;
     case "not_configured":
