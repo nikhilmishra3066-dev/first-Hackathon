@@ -36,6 +36,9 @@ function readText(value, max) {
 }
 
 const toRad = (d) => (d * Math.PI) / 180;
+// Nominatim allows ~1 request/second; space sequential calls so amenity lookups aren't 403'd.
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const NOMINATIM_GAP_MS = 1100;
 
 function distanceM(aLat, aLon, bLat, bLon) {
   const dLat = toRad(bLat - aLat);
@@ -95,6 +98,23 @@ async function nominatimPlaces(kind, lat, lon) {
   return out;
 }
 
+// Manual fallback: resolve a typed city/area to coordinates when GPS is blocked.
+async function geocode(query) {
+  const url = `${NOMINATIM_URL}?q=${encodeURIComponent(query)}&format=jsonv2&limit=1`;
+  const response = await fetch(url, {
+    headers: { accept: "application/json", "user-agent": NOMINATIM_UA },
+    signal: AbortSignal.timeout(9_000),
+  });
+  if (!response.ok) throw new Error(`nominatim ${response.status}`);
+  const rows = await response.json();
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const lat = Number(rows[0]?.lat);
+  const lon = Number(rows[0]?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const name = String(rows[0]?.display_name ?? "").split(",").slice(0, 2).join(",").trim();
+  return { lat, lon, name };
+}
+
 async function overpassPlaces(lat, lon) {
   const query =
     `[out:json][timeout:12];` +
@@ -146,10 +166,10 @@ async function nearbyPlaces(lat, lon) {
   let lists = null;
   if (!OVERPASS_URL) {
     try {
-      lists = {
-        police: await nominatimPlaces("police", lat, lon),
-        hospitals: await nominatimPlaces("hospital", lat, lon),
-      };
+      const police = await nominatimPlaces("police", lat, lon);
+      await sleep(NOMINATIM_GAP_MS);
+      const hospitals = await nominatimPlaces("hospital", lat, lon);
+      lists = { police, hospitals };
     } catch {
       lists = null;
     }
@@ -195,14 +215,35 @@ export async function handleWaitlist({ request, supabase }) {
 
   if (action === "nearby") {
     if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, { allow: "GET" });
-    const lat = Number(params.get("lat"));
-    const lon = Number(params.get("lon"));
-    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-      return json({ ok: false, error: "invalid_location" }, 400);
+    const latRaw = params.get("lat");
+    const lonRaw = params.get("lon");
+    let lat = Number(latRaw);
+    let lon = Number(lonRaw);
+    // Number(null) === 0, so require the params to be present before trusting the coords.
+    const hasCoords =
+      latRaw !== null && lonRaw !== null &&
+      Number.isFinite(lat) && Number.isFinite(lon) &&
+      Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+
+    let resolved = null;
+    if (!hasCoords) {
+      const q = readText(params.get("q"), 80);
+      if (!q) return json({ ok: false, error: "invalid_location" }, 400);
+      try {
+        const place = await geocode(q);
+        if (!place) return json({ ok: false, error: "place_not_found" }, 404);
+        lat = place.lat;
+        lon = place.lon;
+        resolved = place.name || q;
+        await sleep(NOMINATIM_GAP_MS);
+      } catch {
+        return json({ ok: false, error: "nearby_unavailable" }, 503);
+      }
     }
+
     try {
       const value = await nearbyPlaces(lat, lon);
-      return json({ ok: true, radius_m: NEARBY_RADIUS_M, ...value });
+      return json({ ok: true, radius_m: NEARBY_RADIUS_M, ...(resolved ? { resolved } : {}), ...value });
     } catch {
       return json({ ok: false, error: "nearby_unavailable" }, 503);
     }

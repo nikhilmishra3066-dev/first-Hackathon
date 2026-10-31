@@ -323,43 +323,67 @@ function HelpNearYou() {
   const [state, setState] = useState<"idle" | "loading" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<{ police: Place[]; hospitals: Place[] } | null>(null);
+  const [resolved, setResolved] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
-  const locate = () => {
+  const LOOKUP_MESSAGES = {
+    nearby_unavailable: "The live directory is unreachable right now. In an emergency, call 112.",
+    invalid_location: "Could not read that location. Try again, or call 112.",
+    place_not_found: "We couldn't find that place. Try a nearby city or area name.",
+  };
+
+  const runLookup = async (url: string, fallbackName: string | null) => {
     setState("loading");
     setError(null);
     setData(null);
-    if (!("geolocation" in navigator)) {
-      setError("This device can't share location. The helplines above always work.");
+    setResolved(null);
+    try {
+      const d = await requestJson(url, {}, LOOKUP_MESSAGES);
+      const v = d as { police?: Place[]; hospitals?: Place[]; resolved?: string };
+      setData({ police: v.police ?? [], hospitals: v.hospitals ?? [] });
+      setResolved(v.resolved ?? fallbackName);
+      setState("done");
+      setManualOpen(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. In an emergency, call 112.");
       setState("idle");
+    }
+  };
+
+  const locate = () => {
+    if (!("geolocation" in navigator)) {
+      setManualOpen(true);
+      setError("This device can't share location. Type your city below to find help — or call 112.");
       return;
     }
+    setState("loading");
+    setError(null);
+    setData(null);
+    setResolved(null);
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const d = await requestJson(
-            `/functions/v1/app?action=nearby&lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`,
-            {},
-            {
-              nearby_unavailable: "The live directory is unreachable right now. In an emergency, call 112.",
-              invalid_location: "Could not read your position. Try again, or call 112.",
-            },
-          );
-          const v = d as { police?: Place[]; hospitals?: Place[] };
-          setData({ police: v.police ?? [], hospitals: v.hospitals ?? [] });
-          setState("done");
-        } catch (err) {
-          setError(err instanceof ApiError ? err.message : "Something went wrong. In an emergency, call 112.");
-          setState("idle");
-        }
+      (pos) => {
+        void runLookup(
+          `/functions/v1/app?action=nearby&lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`,
+          null,
+        );
       },
       (err) => {
-        setError(err.code === 1
-          ? "Location permission denied — the helplines above always work."
-          : "Could not get your position right now. The helplines above always work.");
         setState("idle");
+        setManualOpen(true);
+        setError(err.code === 1
+          ? "Location permission was blocked. Type your city below to find help — or call 112."
+          : "We couldn't get your position. Type your city below instead — or call 112.");
       },
-      { timeout: 8000, maximumAge: 300000 },
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 },
     );
+  };
+
+  const searchCity = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = query.trim();
+    if (!q || state === "loading") return;
+    void runLookup(`/functions/v1/app?action=nearby&q=${encodeURIComponent(q)}`, q);
   };
 
   return (
@@ -379,13 +403,31 @@ function HelpNearYou() {
           ))}
         </div>
 
-        <div className="mt-12 flex justify-center">
+        <div className="mt-12 flex flex-col items-center gap-4">
           <button type="button" onClick={locate} disabled={state === "loading"}
             className="micro sh-ink-sm inline-flex items-center gap-2.5 rounded-full bg-brand-ink px-8 py-4 font-extrabold text-brand-yellow transition hover:-translate-y-0.5 disabled:opacity-60">
             <Icon.Pin className="size-4" />
             {state === "loading" ? "Finding help…" : "Find help near me"}
           </button>
+          <button type="button" onClick={() => setManualOpen((v) => !v)}
+            className="micro text-brand-white/80 underline underline-offset-4 transition hover:text-brand-yellow">
+            {manualOpen ? "Hide city search" : "Location blocked? Enter your city instead"}
+          </button>
         </div>
+
+        {manualOpen && (
+          <form onSubmit={searchCity} className="mx-auto mt-6 flex max-w-md gap-3">
+            <input
+              type="text" value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="e.g. Kothrud, Pune" aria-label="City or area"
+              className="h-13 w-full rounded-full border-[3px] border-brand-ink bg-brand-white px-5 text-brand-ink placeholder:text-brand-ink/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-yellow"
+            />
+            <button type="submit" disabled={state === "loading" || !query.trim()}
+              className="sh-ink-sm micro rounded-full bg-brand-ink px-6 font-extrabold text-brand-yellow transition hover:-translate-y-0.5 disabled:opacity-60">
+              Search
+            </button>
+          </form>
+        )}
 
         {error && (
           <p role="alert" className="mx-auto mt-8 max-w-xl rounded-2xl bg-brand-ink px-6 py-4 text-center font-extrabold text-white">
@@ -394,9 +436,14 @@ function HelpNearYou() {
         )}
 
         {state === "done" && data && (
-          <div className="mt-12 grid gap-8 md:grid-cols-2">
-            <PlaceList title="Police stations" places={data.police} />
-            <PlaceList title="Hospitals" places={data.hospitals} />
+          <div className="mt-12">
+            {resolved && (
+              <p className="mb-6 text-center font-extrabold text-brand-yellow">Showing help near {resolved}</p>
+            )}
+            <div className="grid gap-8 md:grid-cols-2">
+              <PlaceList title="Police stations" places={data.police} />
+              <PlaceList title="Hospitals" places={data.hospitals} />
+            </div>
           </div>
         )}
       </div>
