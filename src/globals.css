@@ -1,0 +1,217 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "../vendor/shadcn-tailwind-4.13.0.css";
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+/* SafeHer — flat, solid, high-contrast block design. One bold colour per screen. */
+:root {
+  --background: #f5f1e8;
+  --foreground: #101010;
+  --card: #ffffff;
+  --card-foreground: #101010;
+  --popover: #ffffff;
+  --popover-foreground: #101010;
+  --primary: #e7221a;
+  --primary-foreground: #ffffff;
+  --secondary: #ffd400;
+  --secondary-foreground: #101010;
+  --muted: #eae4d6;
+  --muted-foreground: #57503f;
+  --accent: #ffd400;
+  --accent-foreground: #101010;
+  --destructive: #e7221a;
+  --border: #101010;
+  --input: #101010;
+  --ring: #e7221a;
+  --chart-1: #e7221a;
+  --chart-2: #ffd400;
+  --chart-3: #101010;
+  --chart-4: #f5f1e8;
+  --chart-5: #ffffff;
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #101010;
+  --sidebar-primary: #e7221a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eae4d6;
+  --sidebar-accent-foreground: #101010;
+  --sidebar-border: #101010;
+  --sidebar-ring: #e7221a;
+
+  --brand-red: #e7221a;
+  --brand-ink: #101010;
+  --brand-bone: #f5f1e8;
+  --brand-yellow: #ffd400;
+  --brand-white: #ffffff;
+  --font-display: "Anton", ui-sans-serif, system-ui, sans-serif;
+
+  /* cursor position (-0.5 … 0.5), written by useCursorScene */
+  --cx: 0;
+  --cy: 0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-brand-red: var(--brand-red);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-bone: var(--brand-bone);
+  --color-brand-yellow: var(--brand-yellow);
+  --color-brand-white: var(--brand-white);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 8px);
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  --animate-marquee: marquee 26s linear infinite;
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes pulse-ring {
+  from { transform: scale(0.82); opacity: 0.75; }
+  to { transform: scale(1.75); opacity: 0; }
+}
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+/* --------------------------- solid block system --------------------------- */
+
+/* thick outline + hard offset shadow = the only "depth" in the system */
+.blk {
+  border: 3px solid var(--brand-ink);
+}
+.sh-ink { box-shadow: 8px 8px 0 var(--brand-ink); }
+.sh-ink-sm { box-shadow: 5px 5px 0 var(--brand-ink); }
+.sh-white { box-shadow: 8px 8px 0 var(--brand-white); }
+.sh-yellow { box-shadow: 8px 8px 0 var(--brand-yellow); }
+.sh-red { box-shadow: 8px 8px 0 var(--brand-red); }
+
+/* uppercase micro label, like the reference badge pills */
+.micro {
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* condensed poster headlines */
+.poster {
+  font-family: var(--font-display);
+  font-weight: 400;
+  text-transform: uppercase;
+  line-height: 0.92;
+  letter-spacing: 0.005em;
+}
+
+/* hero mascot drifts and tilts with the cursor */
+.mascot-par {
+  transform: translate3d(calc(var(--cx) * -26px), calc(var(--cy) * -16px), 0)
+    rotateY(calc(var(--cx) * 9deg)) rotateX(calc(var(--cy) * -6deg));
+  transition: transform 0.25s ease-out;
+  transform-style: preserve-3d;
+}
+.par-soft {
+  transform: translate3d(calc(var(--cx) * 14px), calc(var(--cy) * 10px), 0);
+  transition: transform 0.3s ease-out;
+}
+.persp { perspective: 1200px; }
+
+/* flat marquee band */
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: var(--animate-marquee);
+}
+
+/* scroll reveal: simple rise, no rotation */
+.r3d {
+  opacity: 0;
+  transform: translateY(34px);
+  transition: opacity 0.7s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.r3d.in {
+  opacity: 1;
+  transform: none;
+}
+
+.sos-ring { animation: pulse-ring 2.4s cubic-bezier(0.2, 0.6, 0.4, 1) infinite; }
+.sos-ring-2 { animation-delay: 1.2s; }
+.bob { animation: bob 5s ease-in-out infinite; }
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .r3d { opacity: 1; transform: none; }
+  .mascot-par, .par-soft { transform: none; }
+}
