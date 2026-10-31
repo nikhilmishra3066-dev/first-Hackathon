@@ -11,6 +11,7 @@ import {
 import mascot from "../assets/mascot.jpg";
 import { navigate } from "../router";
 import { saveSession, type LoginMethod } from "../lib/auth";
+import { OtpError, confirmOtp, describeOtpError, requestOtp } from "../lib/otp-client";
 import styles from "./login.module.css";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -30,15 +31,6 @@ function cleanMobile(value: string): string {
 function formatWho(method: LoginMethod, value: string): string {
   if (method === "email") return value.toLowerCase();
   return `+91 ${value.slice(0, 5)} ${value.slice(5)}`;
-}
-
-const OTP_TTL_MS = 2 * 60 * 1000;
-const OTP_RESEND_MS = 30 * 1000;
-
-function generateCode(): string {
-  const buffer = new Uint32Array(1);
-  crypto.getRandomValues(buffer);
-  return String(buffer[0] % 1_000_000).padStart(6, "0");
 }
 
 function maskTarget(method: LoginMethod, value: string): string {
@@ -200,7 +192,8 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [who, setWho] = useState<string | null>(null);
-  const [code, setCode] = useState("");
+  const [token, setToken] = useState("");
+  const [demoCode, setDemoCode] = useState("");
   const [digits, setDigits] = useState<string[]>(() => Array(6).fill(""));
   const [expiresAt, setExpiresAt] = useState(0);
   const [resendAt, setResendAt] = useState(0);
@@ -264,7 +257,7 @@ export default function Login() {
     setNote(null);
   }
 
-  function onSubmit(event: FormEvent) {
+  async function onSubmit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     setError(null);
@@ -312,24 +305,28 @@ export default function Login() {
     setInvalid({ identifier: false, password: false });
     setBusy(true);
 
-    const signedInAs = formatWho(method, value);
-    pending.current = { who: signedInAs, method, remember };
-    setWho(signedInAs);
-
-    window.setTimeout(() => {
+    try {
+      const delivery = await requestOtp(method, value);
       const startedAt = Date.now();
-      setBusy(false);
-      setCode(generateCode());
+      const signedInAs = formatWho(method, value);
+      pending.current = { who: signedInAs, method, remember };
+      setWho(signedInAs);
+      setToken(delivery.token);
+      setDemoCode(delivery.demoCode ?? "");
       setDigits(Array(6).fill(""));
-      setExpiresAt(startedAt + OTP_TTL_MS);
-      setResendAt(startedAt + OTP_RESEND_MS);
+      setExpiresAt(startedAt + delivery.expiresIn);
+      setResendAt(startedAt + delivery.resendIn);
       setNow(startedAt);
       setOtpInvalid(false);
       setStep("otp");
-    }, 900);
+    } catch (err) {
+      setError(describeOtpError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function onVerify(event: FormEvent) {
+  async function onVerify(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     setError(null);
@@ -344,39 +341,69 @@ export default function Login() {
       setError("Enter the 6-digit code.");
       return;
     }
-    if (entered !== code) {
-      setError("That code doesn’t match. Check and try again.");
-      setOtpInvalid(true);
-      setDigits(Array(6).fill(""));
-      otpRefs.current[0]?.focus();
-      return;
-    }
 
     setBusy(true);
-    window.setTimeout(() => {
-      setBusy(false);
+    try {
+      await confirmOtp(token, entered);
+      setOtpInvalid(false);
       setStep("success");
       redirectTimer.current = window.setTimeout(finish, 1800);
-    }, 700);
+    } catch (err) {
+      if (err instanceof OtpError && err.code === "invalid_code") {
+        setOtpInvalid(true);
+        setDigits(Array(6).fill(""));
+        setError(describeOtpError(err));
+        otpRefs.current[0]?.focus();
+      } else if (err instanceof OtpError && err.code === "expired") {
+        setExpiresAt(0);
+        setDigits(Array(6).fill(""));
+        setError("That code expired. Resend a new one.");
+      } else if (err instanceof OtpError && err.code === "invalid_token") {
+        setToken("");
+        setDemoCode("");
+        setDigits(Array(6).fill(""));
+        setStep("credentials");
+        setError("That sign-in attempt expired. Start again.");
+      } else {
+        setError(describeOtpError(err));
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function resendCode() {
-    const startedAt = Date.now();
-    if (startedAt < resendAt || busy) return;
-    setCode(generateCode());
-    setDigits(Array(6).fill(""));
-    setExpiresAt(startedAt + OTP_TTL_MS);
-    setResendAt(startedAt + OTP_RESEND_MS);
-    setNow(startedAt);
+  async function resendCode() {
+    if (busy || Date.now() < resendAt) return;
+    setBusy(true);
     setError(null);
-    setOtpInvalid(false);
-    otpRefs.current[0]?.focus();
+
+    try {
+      const delivery = await requestOtp(method, method === "email" ? identifier.trim() : cleanMobile(identifier));
+      const startedAt = Date.now();
+      setToken(delivery.token);
+      setDemoCode(delivery.demoCode ?? "");
+      setDigits(Array(6).fill(""));
+      setExpiresAt(startedAt + delivery.expiresIn);
+      setResendAt(startedAt + delivery.resendIn);
+      setNow(startedAt);
+      setOtpInvalid(false);
+      otpRefs.current[0]?.focus();
+    } catch (err) {
+      if (err instanceof OtpError && err.retryAfter) {
+        setResendAt(Date.now() + err.retryAfter * 1000);
+        setNow(Date.now());
+      }
+      setError(describeOtpError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function changeAccount() {
     setStep("credentials");
     setDigits(Array(6).fill(""));
-    setCode("");
+    setToken("");
+    setDemoCode("");
     setError(null);
     setNote(null);
     setOtpInvalid(false);
@@ -509,7 +536,15 @@ export default function Login() {
                       )}
                     </h1>
                     <p className={styles["card-sub"]}>
-                      We sent a 6-digit code to <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
+                      {demoCode ? (
+                        <>
+                          Demo code for <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
+                        </>
+                      ) : (
+                        <>
+                          We sent a 6-digit code to <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
+                        </>
+                      )}
                     </p>
                   </header>
 
@@ -551,9 +586,11 @@ export default function Login() {
                         {error}
                       </p>
                     )}
-                    <p className={styles.note} role="status">
-                      Demo mode: your code is <strong>{code}</strong>. Nothing is sent to a real inbox.
-                    </p>
+                    {demoCode && (
+                      <p className={styles.note} role="status">
+                        Demo mode: no message is sent. Your code is <strong>{demoCode}</strong>.
+                      </p>
+                    )}
 
                     <button className={styles.submit} type="submit" disabled={busy}>
                       {busy && <span className={styles.spinner} aria-hidden="true" />}
@@ -721,7 +758,7 @@ export default function Login() {
             <path d="M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
             <path d="m9 12 2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Your sign-in stays in this browser. No details leave your device.
+          Your email or number is only used to send this sign-in code.
         </p>
       </main>
     </div>
