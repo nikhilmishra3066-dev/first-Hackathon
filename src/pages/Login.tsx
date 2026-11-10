@@ -193,7 +193,6 @@ export default function Login() {
   const [note, setNote] = useState<string | null>(null);
   const [who, setWho] = useState<string | null>(null);
   const [token, setToken] = useState("");
-  const [demoCode, setDemoCode] = useState("");
   const [newAccount, setNewAccount] = useState(false);
   const [digits, setDigits] = useState<string[]>(() => Array(6).fill(""));
   const [expiresAt, setExpiresAt] = useState(0);
@@ -313,7 +312,6 @@ export default function Login() {
       pending.current = { who: signedInAs, method, remember };
       setWho(signedInAs);
       setToken(delivery.token);
-      setDemoCode(delivery.demoCode ?? "");
       setNewAccount(delivery.newAccount);
       setDigits(Array(6).fill(""));
       setExpiresAt(startedAt + delivery.expiresIn);
@@ -362,7 +360,6 @@ export default function Login() {
         setError("That code expired. Resend a new one.");
       } else if (err instanceof OtpError && err.code === "invalid_token") {
         setToken("");
-        setDemoCode("");
         setNewAccount(false);
         setDigits(Array(6).fill(""));
         setStep("credentials");
@@ -388,7 +385,6 @@ export default function Login() {
       );
       const startedAt = Date.now();
       setToken(delivery.token);
-      setDemoCode(delivery.demoCode ?? "");
       setNewAccount(delivery.newAccount);
       setDigits(Array(6).fill(""));
       setExpiresAt(startedAt + delivery.expiresIn);
@@ -411,7 +407,6 @@ export default function Login() {
     setStep("credentials");
     setDigits(Array(6).fill(""));
     setToken("");
-    setDemoCode("");
     setNewAccount(false);
     setError(null);
     setNote(null);
@@ -545,15 +540,9 @@ export default function Login() {
                       )}
                     </h1>
                     <p className={styles["card-sub"]}>
-                      {demoCode ? (
-                        <>
-                          Demo code for <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
-                        </>
-                      ) : (
-                        <>
-                          We sent a 6-digit code to <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
-                        </>
-                      )}
+                      <>
+                        We sent a 6-digit code to <strong>{maskTarget(method, identifier)}</strong>. It’s valid for 2 minutes.
+                      </>
                       {newAccount && <> Verifying it also creates your account with the password you just set.</>}
                     </p>
                   </header>
@@ -594,11 +583,6 @@ export default function Login() {
                     {error && (
                       <p className={styles.error} role="alert">
                         {error}
-                      </p>
-                    )}
-                    {demoCode && (
-                      <p className={styles.note} role="status">
-                        Demo mode: no message is sent. Your code is <strong>{demoCode}</strong>.
                       </p>
                     )}
 

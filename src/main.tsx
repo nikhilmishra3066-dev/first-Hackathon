@@ -15,12 +15,14 @@ function Router() {
 
   useEffect(() => {
     if (session && path === "/login") replace("/");
+    // Only account-specific pages need a signed-in session; the public site stays open.
+    if (!session && path.startsWith("/account")) replace("/login");
   }, [session, path]);
 
   if (path.startsWith("/track")) return <LiveTracking />;
   if (path.startsWith("/live-demo")) return <LiveDemo />;
-  if (!session) return <Login />;
-  if (path.startsWith("/account")) return <Account />;
+  if (path.startsWith("/account")) return session ? <Account /> : <Login />;
+  if (path === "/login") return <Login />;
   return <App />;
 }
 
